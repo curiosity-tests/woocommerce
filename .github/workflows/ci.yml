@@ -73,11 +73,11 @@ on:
 
 concurrency:
   # Cancel concurrent jobs but not for push event. For push use the run_id to have a unique group.
-  group: ci-${{ github.event_name == 'push' && github.run_id || github.event_name }}-${{ github.ref }}-${{ inputs.trigger }}-${{ inputs.leg || 'push' }}-${{ inputs.racecar_run }}
+  group: ci-${{ 'push' == 'push' && github.run_id || 'push' }}-${{ github.ref }}-${{ inputs.trigger }}-${{ inputs.leg || 'push' }}-${{ inputs.racecar_run }}
   cancel-in-progress: false
 
 env:
-  CHALK_ON: ${{ github.event_name == 'workflow_dispatch' && inputs.leg != 'baseline' }}
+  CHALK_ON: ${{ inputs.leg == 'instrumented' }}
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
   FORCE_COLOR: 1
   # Paths that cannot change the behaviour of any code. `identify-jobs-to-run` derives the
@@ -108,7 +108,7 @@ permissions:
 jobs:
   identify-jobs-to-run:
     name: 'Analyze changes'
-    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    if: ${{ !cancelled() && 'push' == 'pull_request' }}
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
@@ -186,11 +186,11 @@ jobs:
             // - Pushes: run CI jobs aiming pushes without filtering based on the content changes
 
             let prNumberFilter   = '';
-            if ( '${{ github.event_name }}' === 'pull_request' ) {
+            if ( '${{ 'push' }}' === 'pull_request' ) {
               prNumberFilter = `--pr-number ${{ github.event.pull_request.number }}`;
             }
 
-            let githubEvent = ${{ toJson( github.event_name ) }};
+            let githubEvent = ${{ toJson( 'push' ) }};
 
             let trigger = ${{ toJson( inputs.trigger ) }};
             if ( trigger ) {
@@ -211,7 +211,7 @@ jobs:
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 10
     needs: [ 'identify-jobs-to-run', 'project-jobs' ]
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' && needs.project-jobs.outputs.lint-jobs != '[]' }}
+    if: ${{ !cancelled() && 'push' == 'pull_request' && needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' && needs.project-jobs.outputs.lint-jobs != '[]' }}
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -301,7 +301,7 @@ jobs:
     needs: [ 'identify-jobs-to-run', 'project-jobs' ]
     # The `needs-code-validation` clause mirrors `project-test-jobs`: without it this job builds a
     # plugin zip for consumers that are themselves gated off, which is pure waste on docs-only PRs.
-    if: ${{ !cancelled() && ( github.event_name != 'pull_request' || needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' ) && needs.project-jobs.result == 'success' && inputs.artifactName == '' && needs.project-jobs.outputs.shared-plugin-build-needed == 'true' }}
+    if: ${{ !cancelled() && ( 'push' != 'pull_request' || needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' ) && needs.project-jobs.result == 'success' && inputs.artifactName == '' && needs.project-jobs.outputs.shared-plugin-build-needed == 'true' }}
     permissions:
       contents: read
       id-token: write
@@ -358,10 +358,10 @@ jobs:
     name: '${{ matrix.name }}'
     # While the CI_QUEUE_OVERFLOW repository variable is '1', e2e jobs route to the
     # dedicated group. Fork PRs are excluded.
-    runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || ( vars.CI_QUEUE_OVERFLOW == '1' && matrix.testType == 'e2e' && ( github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository ) ) && fromJSON('{"group":"Woo Core Dedicated CI"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || ( vars.CI_QUEUE_OVERFLOW == '1' && matrix.testType == 'e2e' && ( 'push' != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository ) ) && fromJSON('{"group":"Woo Core Dedicated CI"}') || 'ubuntu-latest' }}
     timeout-minutes: 35
     needs: [ 'identify-jobs-to-run', 'project-jobs', 'woocommerce-plugin-build-artifact' ]
-    if: ${{ !cancelled() && ( github.event_name != 'pull_request' || needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' ) && needs.project-jobs.outputs.test-jobs != '[]' && ( needs.woocommerce-plugin-build-artifact.result == 'success' || needs.woocommerce-plugin-build-artifact.result == 'skipped' || needs.project-jobs.outputs.shared-plugin-build-has-required-consumers != 'true' ) }}
+    if: ${{ !cancelled() && ( 'push' != 'pull_request' || needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' ) && needs.project-jobs.outputs.test-jobs != '[]' && ( needs.woocommerce-plugin-build-artifact.result == 'success' || needs.woocommerce-plugin-build-artifact.result == 'skipped' || needs.project-jobs.outputs.shared-plugin-build-has-required-consumers != 'true' ) }}
     env: ${{ matrix.testEnv.envVars }}
     strategy:
       fail-fast: false
@@ -501,7 +501,7 @@ jobs:
           path: '${{ runner.temp }}/last-run-info'
 
       - name: 'Run tests (${{ matrix.testType }})'
-        timeout-minutes: ${{ ( github.event_name == 'pull_request' && ( ( matrix.testType == 'e2e' && 20 ) || ( matrix.testType == 'unit:php' && 20 ) ) ) || 360 }}
+        timeout-minutes: ${{ ( 'push' == 'pull_request' && ( ( matrix.testType == 'e2e' && 20 ) || ( matrix.testType == 'unit:php' && 20 ) ) ) || 360 }}
         env:
           E2E_ENV_KEY: ${{ secrets.E2E_ENV_KEY }}
           CODEVITALS_PROJECT_TOKEN: ${{ secrets.CODEVITALS_PROJECT_TOKEN }} # required by Metrics tests
@@ -625,7 +625,7 @@ jobs:
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 5
     needs: ['project-jobs', 'woocommerce-plugin-build-artifact', 'project-lint-jobs', 'project-test-jobs', 'evaluate-project-jobs']
-    if: ${{ !cancelled() && github.event_name != 'pull_request' && github.repository == 'woocommerce/woocommerce' }}
+    if: ${{ !cancelled() && 'push' != 'pull_request' && github.repository == 'curiosity-tests/woocommerce' }}
     env:
       NON_SUCCESSFUL_JOBS: ${{ needs.evaluate-project-jobs.outputs.non_successful_jobs }}
     steps:
@@ -687,7 +687,7 @@ jobs:
   test-reports:
     name: 'Test reports - ${{ matrix.report }}'
     needs: ['identify-jobs-to-run', 'project-jobs', 'project-test-jobs', 'evaluate-project-jobs']
-    if: ${{ !cancelled() && github.repository == 'woocommerce/woocommerce' && ( github.event_name != 'pull_request' || ( needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' && ! github.event.pull_request.head.repo.fork ) ) && needs.project-jobs.outputs.report-jobs != '[]' }}
+    if: ${{ !cancelled() && github.repository == 'curiosity-tests/woocommerce' && ( 'push' != 'pull_request' || ( needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' && ! github.event.pull_request.head.repo.fork ) ) && needs.project-jobs.outputs.report-jobs != '[]' }}
     strategy:
       fail-fast: false
       max-parallel: 1
@@ -717,13 +717,13 @@ jobs:
           REPORT_NAME: ${{ matrix.report }}
           HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
           PR_TITLE: ${{ github.event.pull_request.title }}
-          EVENT_NAME: ${{ inputs.trigger == '' && github.event_name || inputs.trigger }}
+          EVENT_NAME: ${{ inputs.trigger == '' && 'push' || inputs.trigger }}
           REF_NAME: ${{ inputs.refName != '' && inputs.refName || github.ref_name }}
         run: |
-          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+          if [[ "${{ 'push' }}" == "pull_request" ]]; then
             REPORT_TITLE="$PR_TITLE"
             REF_NAME="$GITHUB_HEAD_REF"
-          elif [[ "${{ github.event_name }}" == "push" ]]; then
+          elif [[ "${{ 'push' }}" == "push" ]]; then
             REPORT_TITLE=`echo "$HEAD_COMMIT_MESSAGE" | head -1`
           else
             REPORT_TITLE="$EVENT_NAME"
@@ -774,7 +774,7 @@ jobs:
 
   validate-syncpack:
     name: 'Validate dependencies version'
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.identify-jobs-to-run.outputs.needs-syncpack-validation == 'true' }}
+    if: ${{ !cancelled() && 'push' == 'pull_request' && needs.identify-jobs-to-run.outputs.needs-syncpack-validation == 'true' }}
     needs: [ 'identify-jobs-to-run' ]
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -822,7 +822,7 @@ jobs:
     if: |-
       ${{
         ! cancelled() &&
-        github.event_name == 'pull_request' &&
+        'push' == 'pull_request' &&
         github.event.pull_request.user.login != 'woocommercebot' &&
         github.event.pull_request.user.login != 'github-actions[bot]' &&
         needs.identify-jobs-to-run.outputs.needs-changelog-validation == 'true' &&
@@ -901,7 +901,7 @@ jobs:
 
   validate-markdown:
     name: 'Validate markdown'
-    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'trunk' && needs.identify-jobs-to-run.outputs.needs-markdown-validation == 'true' }}
+    if: ${{ !cancelled() && 'push' == 'pull_request' && github.event.pull_request.base.ref == 'trunk' && needs.identify-jobs-to-run.outputs.needs-markdown-validation == 'true' }}
     needs: [ 'identify-jobs-to-run' ]
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 5
