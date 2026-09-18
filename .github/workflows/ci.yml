@@ -37,20 +37,20 @@ on:
   pull_request:
   push:
     paths:
-      - '**'
-      - '!docs/**'
-      - '!**/changelog/**'
-      - '!.cursor/**'
-      - '!**/*.md'
-      - '!**/changelog.txt'
-      - '!.gitignore'
-      - '!.coderabbit.yml'
-      - '!CODEOWNERS'
-      - '!.github/**'
-      - '.github/workflows/ci.yml'
+    - '**'
+    - '!docs/**'
+    - '!**/changelog/**'
+    - '!.cursor/**'
+    - '!**/*.md'
+    - '!**/changelog.txt'
+    - '!.gitignore'
+    - '!.coderabbit.yml'
+    - '!CODEOWNERS'
+    - '!.github/**'
+    - '.github/workflows/ci.yml'
     branches:
-      - 'trunk'
-      - 'release/*'
+    - 'trunk'
+    - 'release/*'
   workflow_call:
     inputs:
       trigger:
@@ -114,25 +114,25 @@ jobs:
     outputs:
       needs-code-validation: ${{ steps.target-changes.outputs.needs-code-validation }}
       needs-changelog-validation: ${{ steps.target-changes.outputs.needs-changelog-validation }}
-      needs-markdown-validation:  ${{ steps.target-changes.outputs.needs-markdown-validation }}
-      needs-syncpack-validation:  ${{ steps.target-changes.outputs.needs-syncpack-validation }}
+      needs-markdown-validation: ${{ steps.target-changes.outputs.needs-markdown-validation }}
+      needs-syncpack-validation: ${{ steps.target-changes.outputs.needs-syncpack-validation }}
     steps:
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: target-changes
-        with:
+    - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706   # v4.0.2
+      id: target-changes
+      with:
           # `needs-code-validation` is the negation of `NON_CODE_PATHS`: a PR needs code
           # validation when it touches anything that list does not cover. Edit the list, not
           # this line.
-          filters: |
-            needs-code-validation:
-              - "!((${{ join( fromJSON( env.NON_CODE_PATHS ), ')|(' ) }}))"
-            needs-changelog-validation:
-              - '{packages,plugins}/*/!((changelog/*)|(readme.txt))'
-            needs-markdown-validation:
-              - '*.md'
-              - '!(.github/**)/**/*.md'
-            needs-syncpack-validation:
-              - '(.syncpackrc)|(pnpm-lock.yaml)|(pnpm-workspace.yaml)'
+        filters: |
+          needs-code-validation:
+            - "!((${{ join( fromJSON( env.NON_CODE_PATHS ), ')|(' ) }}))"
+          needs-changelog-validation:
+            - '{packages,plugins}/*/!((changelog/*)|(readme.txt))'
+          needs-markdown-validation:
+            - '*.md'
+            - '!(.github/**)/**/*.md'
+          needs-syncpack-validation:
+            - '(.syncpackrc)|(pnpm-lock.yaml)|(pnpm-workspace.yaml)'
 
   project-jobs:
     # Since this is a monorepo, not every pull request or change is going to impact every project.
@@ -151,66 +151,133 @@ jobs:
       shared-plugin-build-needed: ${{ steps.project-jobs.outputs.shared-plugin-build-needed }}
       shared-plugin-build-has-required-consumers: ${{ steps.project-jobs.outputs.shared-plugin-build-has-required-consumers }}
     steps:
-      - uses: crashappsec/action-checkout@main
-        name: 'Checkout'
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-          ref: ${{ inputs.refName != '' && inputs.refName || '' }}
+    - uses: crashappsec/action-checkout@main
+      name: 'Checkout'
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+        ref: ${{ inputs.refName != '' && inputs.refName || '' }}
 
-      - name: Assert instrumentation is live
-        # Socket existence, not LD_PRELOAD: co-monitor's loader clears
-        # LD_PRELOAD once it has injected, so an empty value is what success
-        # looks like. co-hostd also daemonizes, so pgrep does not match it.
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - name: Setup - pnpm
+      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271   # v6.0.9
 
+    - name: Setup - spawn linting and testing jobs
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd   # v8.0.0
+      id: 'project-jobs'
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      with:
+        script: |
+          // Intended behaviour of the jobs generation:
+          // - PRs: run CI jobs aiming PRs and filter out jobs based on the content changes
+          // - Pushes: run CI jobs aiming pushes without filtering based on the content changes
 
-      - name: Setup - pnpm
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+          let prNumberFilter   = '';
+          if ( '${{ 'push' }}' === 'pull_request' ) {
+            prNumberFilter = `--pr-number ${{ github.event.pull_request.number }}`;
+          }
 
-      - name: Setup - spawn linting and testing jobs
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
-        id: 'project-jobs'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        with:
-          script: |
-            // Intended behaviour of the jobs generation:
-            // - PRs: run CI jobs aiming PRs and filter out jobs based on the content changes
-            // - Pushes: run CI jobs aiming pushes without filtering based on the content changes
+          let githubEvent = ${{ toJson( 'push' ) }};
 
-            let prNumberFilter   = '';
-            if ( '${{ 'push' }}' === 'pull_request' ) {
-              prNumberFilter = `--pr-number ${{ github.event.pull_request.number }}`;
-            }
+          let trigger = ${{ toJson( inputs.trigger ) }};
+          if ( trigger ) {
+            githubEvent = trigger;
+          }
 
-            let githubEvent = ${{ toJson( 'push' ) }};
+          // `pre-release` should trigger `release-checks`, but without a specific refName.
+          // This will run all release-checks against the branch the workflow targeted, instead of a release artifact.
+          if ( trigger === 'pre-release' ) {
+            githubEvent = 'release-checks';
+          }
 
-            let trigger = ${{ toJson( inputs.trigger ) }};
-            if ( trigger ) {
-              githubEvent = trigger;
-            }
+          const child_process = require( 'node:child_process' );
+          child_process.execSync( `pnpm utils ci-jobs ${ prNumberFilter } --event ${ githubEvent }` );
 
-            // `pre-release` should trigger `release-checks`, but without a specific refName.
-            // This will run all release-checks against the branch the workflow targeted, instead of a release artifact.
-            if ( trigger === 'pre-release' ) {
-              githubEvent = 'release-checks';
-            }
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
 
-            const child_process = require( 'node:child_process' );
-            child_process.execSync( `pnpm utils ci-jobs ${ prNumberFilter } --event ${ githubEvent }` );
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
 
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   project-lint-jobs:
     name: "Lint - ${{ matrix.projectName }} ${{ ( matrix.optional && ' (optional)' ) || '' }}"
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 10
-    needs: [ 'identify-jobs-to-run', 'project-jobs' ]
+    needs: ['identify-jobs-to-run', 'project-jobs']
     if: ${{ !cancelled() && 'push' == 'pull_request' && needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' && needs.project-jobs.outputs.lint-jobs != '[]' }}
     strategy:
       fail-fast: false
@@ -218,37 +285,27 @@ jobs:
       matrix:
         include: ${{ fromJSON( needs.project-jobs.outputs.lint-jobs ) }}
     steps:
-      - uses: crashappsec/action-checkout@main
-        name: 'Checkout'
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-          ref: ${{ inputs.refName != '' && inputs.refName || '' }}
+    - uses: crashappsec/action-checkout@main
+      name: 'Checkout'
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+        ref: ${{ inputs.refName != '' && inputs.refName || '' }}
           # We tried to speed checkout up with shallow copies, but `git merge-base ...` used on different levels of tooling forces us to follow this approach.
-          fetch-depth: ${{ ( ( matrix.projectName == '@woocommerce/plugin-woocommerce' && '0' ) || '1' ) }}
+        fetch-depth: ${{ ( ( matrix.projectName == '@woocommerce/plugin-woocommerce' && '0' ) || '1' ) }}
 
-      - name: Assert instrumentation is live
-        # Socket existence, not LD_PRELOAD: co-monitor's loader clears
-        # LD_PRELOAD once it has injected, so an empty value is what success
-        # looks like. co-hostd also daemonizes, so pgrep does not match it.
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
-
-
-      - uses: './.github/actions/setup-woocommerce-monorepo'
-        id: 'setup-monorepo'
-        with:
-          install: '${{ matrix.projectName }}...'
-          pull-package-deps: '${{ matrix.projectName }}'
-          php-version:  ${{ ( ( matrix.projectName == '@woocommerce/plugin-woocommerce' && '7.4' ) || 'false' ) }}
+    - uses: './.github/actions/setup-woocommerce-monorepo'
+      id: 'setup-monorepo'
+      with:
+        install: '${{ matrix.projectName }}...'
+        pull-package-deps: '${{ matrix.projectName }}'
+        php-version: ${{ ( ( matrix.projectName == '@woocommerce/plugin-woocommerce' && '7.4' ) || 'false' ) }}
           # cs2pr turns the PHPCS checkstyle report into inline annotations in the
           # 'Lint: PHP inline annotations' step; installed here alongside PHP (and
           # only where PHP installs) rather than in a second setup-php invocation.
-          php-tools: 'cs2pr'
+        php-tools: 'cs2pr'
 
       # On PHPCS failure, lint-branch.sh writes the findings to this path as a
       # checkstyle report, so the annotation step after 'Lint' can surface them as
@@ -259,20 +316,20 @@ jobs:
       # The file's presence is what triggers the annotation, so it must mean exactly
       # "phpcs failed": if another linter ever emits a checkstyle report, it needs
       # its own variable and file, never this one.
-      - name: 'Set the PHPCS report path'
-        run: echo "WC_PHPCS_CHECKSTYLE_FILE=$RUNNER_TEMP/phpcs-checkstyle.xml" >> "$GITHUB_ENV"
+    - name: 'Set the PHPCS report path'
+      run: echo "WC_PHPCS_CHECKSTYLE_FILE=$RUNNER_TEMP/phpcs-checkstyle.xml" >> "$GITHUB_ENV"
 
-      - name: 'Lint'
-        id: 'lint'
-        run: 'pnpm --filter="${{ matrix.projectName }}" ${{ matrix.command }}'
+    - name: 'Lint'
+      id: 'lint'
+      run: 'pnpm --filter="${{ matrix.projectName }}" ${{ matrix.command }}'
 
       # Gate on the Lint step's own outcome (not job-level failure()) so this step
       # reacts only to a lint failure, never to an unrelated step failing;
       # !cancelled() is required because after a failure GitHub skips later steps
       # unless told otherwise. The report only exists when PHPCS itself failed, so
       # a JS-only failure (or another project's) takes the empty branch.
-      - name: 'Lint: PHP inline annotations'
-        if: ${{ !cancelled() && steps.lint.outcome == 'failure' }}
+    - name: 'Lint: PHP inline annotations'
+      if: ${{ !cancelled() && steps.lint.outcome == 'failure' }}
         # cs2pr exits non-zero whenever the report contains errors; finish green
         # regardless: the Lint step already set the verdict, and a second red step
         # would be noise. The totals are stated first because GitHub renders roughly
@@ -281,24 +338,101 @@ jobs:
         # The XML check guards against the report holding composer chatter or a partial
         # write instead of checkstyle: cs2pr would fail to parse it, and the || true
         # would turn that into a silently empty step.
-        run: |
-          if [[ ! -s "$WC_PHPCS_CHECKSTYLE_FILE" ]]; then
-            echo 'No PHPCS checkstyle report to annotate.'
-          elif ! head -n1 "$WC_PHPCS_CHECKSTYLE_FILE" | grep -q '<?xml'; then
-            echo 'The PHPCS report exists but does not look like checkstyle XML; skipping annotations. First lines:'
-            head -n5 "$WC_PHPCS_CHECKSTYLE_FILE"
-          else
-            errors=$(grep -c 'severity="error"' "$WC_PHPCS_CHECKSTYLE_FILE" || true)
-            warnings=$(grep -c 'severity="warning"' "$WC_PHPCS_CHECKSTYLE_FILE" || true)
-            echo "PHPCS reported ${errors} error(s) and ${warnings} warning(s). GitHub may render only the first ~10 of each inline; the full readable report is in the Lint step's log."
-            cs2pr "$WC_PHPCS_CHECKSTYLE_FILE" || true
-          fi
+      run: |
+        if [[ ! -s "$WC_PHPCS_CHECKSTYLE_FILE" ]]; then
+          echo 'No PHPCS checkstyle report to annotate.'
+        elif ! head -n1 "$WC_PHPCS_CHECKSTYLE_FILE" | grep -q '<?xml'; then
+          echo 'The PHPCS report exists but does not look like checkstyle XML; skipping annotations. First lines:'
+          head -n5 "$WC_PHPCS_CHECKSTYLE_FILE"
+        else
+          errors=$(grep -c 'severity="error"' "$WC_PHPCS_CHECKSTYLE_FILE" || true)
+          warnings=$(grep -c 'severity="warning"' "$WC_PHPCS_CHECKSTYLE_FILE" || true)
+          echo "PHPCS reported ${errors} error(s) and ${warnings} warning(s). GitHub may render only the first ~10 of each inline; the full readable report is in the Lint step's log."
+          cs2pr "$WC_PHPCS_CHECKSTYLE_FILE" || true
+        fi
 
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
+
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   woocommerce-plugin-build-artifact:
     name: "Build WooCommerce plugin artifact${{ needs.project-jobs.outputs.shared-plugin-build-has-required-consumers != 'true' && ' (optional)' || '' }}"
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 10
-    needs: [ 'identify-jobs-to-run', 'project-jobs' ]
+    needs: ['identify-jobs-to-run', 'project-jobs']
     # The `needs-code-validation` clause mirrors `project-test-jobs`: without it this job builds a
     # plugin zip for consumers that are themselves gated off, which is pure waste on docs-only PRs.
     if: ${{ !cancelled() && ( 'push' != 'pull_request' || needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' ) && needs.project-jobs.result == 'success' && inputs.artifactName == '' && needs.project-jobs.outputs.shared-plugin-build-needed == 'true' }}
@@ -310,57 +444,124 @@ jobs:
       # re-run this job when it succeeded, so consumers must find the previous attempt's artifact.
       WOOCOMMERCE_PLUGIN_ARTIFACT_NAME: woocommerce-plugin-${{ github.run_id }}
     steps:
-      - uses: crashappsec/action-checkout@main
-        name: 'Checkout'
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-          ref: ${{ inputs.refName != '' && inputs.refName || '' }}
-          persist-credentials: false
+    - uses: crashappsec/action-checkout@main
+      name: 'Checkout'
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+        ref: ${{ inputs.refName != '' && inputs.refName || '' }}
+        persist-credentials: false
 
-      - name: Assert instrumentation is live
-        # Socket existence, not LD_PRELOAD: co-monitor's loader clears
-        # LD_PRELOAD once it has injected, so an empty value is what success
-        # looks like. co-hostd also daemonizes, so pgrep does not match it.
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - uses: './.github/actions/setup-woocommerce-monorepo'
+      name: 'Set up build environment'
+      with:
+        install: '@woocommerce/plugin-woocommerce...'
+        pull-package-deps: '@woocommerce/plugin-woocommerce'
 
+    - name: 'Build WooCommerce plugin zip'
+      env:
+        BUILD_ZIP_WITH_MAKEPOT: '0'
+        SKIP_INSTALL: '1'
+        ZIP_COMPRESSION_LEVEL: '1'
+      run: pnpm --filter='@woocommerce/plugin-woocommerce' build:zip
 
-      - uses: './.github/actions/setup-woocommerce-monorepo'
-        name: 'Set up build environment'
-        with:
-          install: '@woocommerce/plugin-woocommerce...'
-          pull-package-deps: '@woocommerce/plugin-woocommerce'
-
-      - name: 'Build WooCommerce plugin zip'
-        env:
-          BUILD_ZIP_WITH_MAKEPOT: '0'
-          SKIP_INSTALL: '1'
-          ZIP_COMPRESSION_LEVEL: '1'
-        run: pnpm --filter='@woocommerce/plugin-woocommerce' build:zip
-
-      - name: 'Upload WooCommerce plugin artifact'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ${{ env.WOOCOMMERCE_PLUGIN_ARTIFACT_NAME }}
-          path: plugins/woocommerce/woocommerce.zip
-          if-no-files-found: error
+    - name: 'Upload WooCommerce plugin artifact'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+      with:
+        name: ${{ env.WOOCOMMERCE_PLUGIN_ARTIFACT_NAME }}
+        path: plugins/woocommerce/woocommerce.zip
+        if-no-files-found: error
           # Long enough to allow re-runs on the following days; these zips are transient CI plumbing.
-          retention-days: 3
-          overwrite: true
-          compression-level: 0
+        retention-days: 3
+        overwrite: true
+        compression-level: 0
 
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
+
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   project-test-jobs:
     name: '${{ matrix.name }}'
     # While the CI_QUEUE_OVERFLOW repository variable is '1', e2e jobs route to the
     # dedicated group. Fork PRs are excluded.
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || ( vars.CI_QUEUE_OVERFLOW == '1' && matrix.testType == 'e2e' && ( 'push' != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository ) ) && fromJSON('{"group":"Woo Core Dedicated CI"}') || 'ubuntu-latest' }}
     timeout-minutes: 35
-    needs: [ 'identify-jobs-to-run', 'project-jobs', 'woocommerce-plugin-build-artifact' ]
+    needs: ['identify-jobs-to-run', 'project-jobs', 'woocommerce-plugin-build-artifact']
     if: ${{ !cancelled() && ( 'push' != 'pull_request' || needs.identify-jobs-to-run.outputs.needs-code-validation == 'true' ) && needs.project-jobs.outputs.test-jobs != '[]' && ( needs.woocommerce-plugin-build-artifact.result == 'success' || needs.woocommerce-plugin-build-artifact.result == 'skipped' || needs.project-jobs.outputs.shared-plugin-build-has-required-consumers != 'true' ) }}
     env: ${{ matrix.testEnv.envVars }}
     strategy:
@@ -369,81 +570,71 @@ jobs:
       matrix:
         include: ${{ fromJSON( needs.project-jobs.outputs.test-jobs ) }}
     steps:
-      - uses: crashappsec/action-checkout@main
-        name: 'Checkout'
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-          ref: ${{ inputs.refName != '' && inputs.refName || '' }}
+    - uses: crashappsec/action-checkout@main
+      name: 'Checkout'
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+        ref: ${{ inputs.refName != '' && inputs.refName || '' }}
 
-      - name: Assert instrumentation is live
-        # Socket existence, not LD_PRELOAD: co-monitor's loader clears
-        # LD_PRELOAD once it has injected, so an empty value is what success
-        # looks like. co-hostd also daemonizes, so pgrep does not match it.
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - uses: './.github/actions/setup-woocommerce-monorepo'
+      name: 'Install Monorepo'
+      id: 'install-monorepo'
+      with:
+        install: '${{ matrix.projectName }}...'
+        build: ${{ ( matrix.usesSharedPluginBuild == true && inputs.artifactName == '' && 'false' ) || matrix.projectName }}
+        build-type: ${{ ( matrix.testType == 'unit:php' && 'backend' ) || ( matrix.testType == 'unit' && 'dependencies' ) || 'full' }}
+        pull-playwright-cache: ${{ matrix.testEnv.shouldCreate && ( matrix.testType == 'e2e' || matrix.testType == 'performance' ) }}
+        pull-package-deps: '${{ matrix.projectName }}'
 
+    - name: 'Download WooCommerce plugin artifact'
+      if: ${{ matrix.usesSharedPluginBuild == true && inputs.artifactName == '' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8.0.1
+      with:
+        name: woocommerce-plugin-${{ github.run_id }}
+        path: ${{ github.workspace }}/woocommerce-plugin-artifact
 
-      - uses: './.github/actions/setup-woocommerce-monorepo'
-        name: 'Install Monorepo'
-        id: 'install-monorepo'
-        with:
-          install: '${{ matrix.projectName }}...'
-          build: ${{ ( matrix.usesSharedPluginBuild == true && inputs.artifactName == '' && 'false' ) || matrix.projectName }}
-          build-type: ${{ ( matrix.testType == 'unit:php' && 'backend' ) || ( matrix.testType == 'unit' && 'dependencies' ) || 'full' }}
-          pull-playwright-cache: ${{ matrix.testEnv.shouldCreate && ( matrix.testType == 'e2e' || matrix.testType == 'performance' ) }}
-          pull-package-deps: '${{ matrix.projectName }}'
+    - name: 'Prepare WooCommerce plugin artifact'
+      if: ${{ matrix.usesSharedPluginBuild == true && inputs.artifactName == '' }}
+      run: |
+        unzip -q "$GITHUB_WORKSPACE/woocommerce-plugin-artifact/woocommerce.zip" -d "$GITHUB_WORKSPACE/woocommerce-plugin-artifact"
+        test -f "$GITHUB_WORKSPACE/woocommerce-plugin-artifact/woocommerce/woocommerce.php"
 
-      - name: 'Download WooCommerce plugin artifact'
-        if: ${{ matrix.usesSharedPluginBuild == true && inputs.artifactName == '' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: woocommerce-plugin-${{ github.run_id }}
-          path: ${{ github.workspace }}/woocommerce-plugin-artifact
-
-      - name: 'Prepare WooCommerce plugin artifact'
-        if: ${{ matrix.usesSharedPluginBuild == true && inputs.artifactName == '' }}
-        run: |
-          unzip -q "$GITHUB_WORKSPACE/woocommerce-plugin-artifact/woocommerce.zip" -d "$GITHUB_WORKSPACE/woocommerce-plugin-artifact"
-          test -f "$GITHUB_WORKSPACE/woocommerce-plugin-artifact/woocommerce/woocommerce.php"
-
-      - name: 'Use WooCommerce plugin artifact in wp-env'
-        if: ${{ matrix.usesSharedPluginBuild == true && inputs.artifactName == '' }}
-        env:
-          PLUGIN_PATH: ${{ github.workspace }}/woocommerce-plugin-artifact/woocommerce
-          WP_ENV_CONFIG_PATH: ${{ github.workspace }}/${{ matrix.projectPath }}
+    - name: 'Use WooCommerce plugin artifact in wp-env'
+      if: ${{ matrix.usesSharedPluginBuild == true && inputs.artifactName == '' }}
+      env:
+        PLUGIN_PATH: ${{ github.workspace }}/woocommerce-plugin-artifact/woocommerce
+        WP_ENV_CONFIG_PATH: ${{ github.workspace }}/${{ matrix.projectPath }}
         # WC_SHARED_PLUGIN_BUILD_PATH lets test setup scripts that modify the plugin
         # (feature flags, generated translations) target the served artifact instead
         # of the source checkout, which is no longer bind-mounted into wp-env.
-        run: |
-          node .github/workflows/scripts/override-wp-env-plugins.js
-          echo "WC_SHARED_PLUGIN_BUILD_PATH=$PLUGIN_PATH" >> "$GITHUB_ENV"
+      run: |
+        node .github/workflows/scripts/override-wp-env-plugins.js
+        echo "WC_SHARED_PLUGIN_BUILD_PATH=$PLUGIN_PATH" >> "$GITHUB_ENV"
 
-      - name: 'Update wp-env config'
-        if: ${{ inputs.artifactName != '' }}
-        env:
-          RELEASE_TAG: ${{ inputs.releaseTag != '' && inputs.releaseTag || ( inputs.refName != '' && inputs.refName || github.ref_name ) }}
-          ARTIFACT_NAME: ${{ inputs.artifactName }}
-          WP_ENV_CONFIG_PATH: ${{ github.workspace }}/${{ matrix.projectPath }}
-        run: node .github/workflows/scripts/override-wp-env-plugins.js
+    - name: 'Update wp-env config'
+      if: ${{ inputs.artifactName != '' }}
+      env:
+        RELEASE_TAG: ${{ inputs.releaseTag != '' && inputs.releaseTag || ( inputs.refName != '' && inputs.refName || github.ref_name ) }}
+        ARTIFACT_NAME: ${{ inputs.artifactName }}
+        WP_ENV_CONFIG_PATH: ${{ github.workspace }}/${{ matrix.projectPath }}
+      run: node .github/workflows/scripts/override-wp-env-plugins.js
 
-      - name: 'Start Test Environment: increase max-download-attempts'
-        if: ${{ matrix.testEnv.shouldCreate }}
-        uses: docker/setup-docker-action@6d7cfa65f60a9dda7b46e5513fa982536f3c9877 # v5.3.0
-        with:
-          daemon-config: |
-            {
-              "max-download-attempts": 10,
-              "max-concurrent-downloads": 3
-            }
+    - name: 'Start Test Environment: increase max-download-attempts'
+      if: ${{ matrix.testEnv.shouldCreate }}
+      uses: docker/setup-docker-action@6d7cfa65f60a9dda7b46e5513fa982536f3c9877   # v5.3.0
+      with:
+        daemon-config: |
+          {
+            "max-download-attempts": 10,
+            "max-concurrent-downloads": 3
+          }
 
-      - name: 'Start Test Environment: start'
-        id: 'prepare-test-environment'
-        if: ${{ matrix.testEnv.shouldCreate }}
+    - name: 'Start Test Environment: start'
+      id: 'prepare-test-environment'
+      if: ${{ matrix.testEnv.shouldCreate }}
         # `wp-env start` fails on transient network timeouts from several subsystems:
         # composer fetching packagist inside the Docker build ("curl error 28"), wp-env's
         # own `got` client downloading WordPress core ("ETIMEDOUT"/"socket hang up"), and
@@ -453,121 +644,198 @@ jobs:
         # so a retry only re-runs whatever failed. Each retried attempt emits a
         # "::warning::wp-env-start-retry reason=<subsystem>" marker (grep-friendly) so the
         # underlying incident rate stays measurable even when the retry keeps the job green.
-        run: |
-          set -o pipefail
-          attempt=1
-          max_attempts=3
-          log="$(mktemp)"
-          trap 'rm -f "$log"' EXIT
-          until pnpm --filter="${{ matrix.projectName }}" ${{ matrix.testEnv.start }} 2>&1 | tee "$log"; do
-            # We retry regardless of cause -- transient failures aren't limited to the
-            # patterns below, so reason= is for monitoring only, not a retry gate.
-            if grep -qF 'curl error 28' "$log"; then reason=packagist
-            elif grep -qE 'registry-1\.docker\.io|context deadline exceeded|failed to receive status: rpc error|connection reset by peer' "$log"; then reason=dockerhub
-            elif grep -qE 'ETIMEDOUT|socket hang up|ECONNRESET' "$log"; then reason=wordpress
-            else reason=unknown
-            fi
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              echo "::error::wp-env start failed after ${max_attempts} attempts (last reason=${reason})"
-              exit 1
-            fi
-            echo "::warning::wp-env-start-retry reason=${reason} attempt=${attempt}/${max_attempts} -- retrying in $((attempt * 15))s"
-            # The AggregateError wp-env surfaces names neither the host nor the address that
-            # failed, so `reason=wordpress` is as far as the log gets us. Trace the retries:
-            # a repeat failure then records every connect attempt with its address and errno.
-            # Healthy first attempts stay untraced, so this costs nothing on a green job.
-            export NODE_DEBUG=net
-            sleep "$((attempt * 15))"
-            attempt=$((attempt + 1))
-          done
+      run: |
+        set -o pipefail
+        attempt=1
+        max_attempts=3
+        log="$(mktemp)"
+        trap 'rm -f "$log"' EXIT
+        until pnpm --filter="${{ matrix.projectName }}" ${{ matrix.testEnv.start }} 2>&1 | tee "$log"; do
+          # We retry regardless of cause -- transient failures aren't limited to the
+          # patterns below, so reason= is for monitoring only, not a retry gate.
+          if grep -qF 'curl error 28' "$log"; then reason=packagist
+          elif grep -qE 'registry-1\.docker\.io|context deadline exceeded|failed to receive status: rpc error|connection reset by peer' "$log"; then reason=dockerhub
+          elif grep -qE 'ETIMEDOUT|socket hang up|ECONNRESET' "$log"; then reason=wordpress
+          else reason=unknown
+          fi
+          if [ "$attempt" -ge "$max_attempts" ]; then
+            echo "::error::wp-env start failed after ${max_attempts} attempts (last reason=${reason})"
+            exit 1
+          fi
+          echo "::warning::wp-env-start-retry reason=${reason} attempt=${attempt}/${max_attempts} -- retrying in $((attempt * 15))s"
+          # The AggregateError wp-env surfaces names neither the host nor the address that
+          # failed, so `reason=wordpress` is as far as the log gets us. Trace the retries:
+          # a repeat failure then records every connect attempt with its address and errno.
+          # Healthy first attempts stay untraced, so this costs nothing on a green job.
+          export NODE_DEBUG=net
+          sleep "$((attempt * 15))"
+          attempt=$((attempt + 1))
+        done
 
-      - name: 'Resolve artifacts path'
-        if: ${{ always() && matrix.report.resultsPath != '' }}
+    - name: 'Resolve artifacts path'
+      if: ${{ always() && matrix.report.resultsPath != '' }}
         # Blocks e2e use a relative path which is not supported by actions/upload-artifact
         # https://github.com/actions/upload-artifact/issues/176
-        env:
-          ARTIFACTS_PATH: '${{ matrix.projectPath }}/${{ matrix.report.resultsPath }}'
-        run: |
-          # first runs will probably not have the directory, so we need to create it so that realpath doesn't fail
-          mkdir -p $ARTIFACTS_PATH
-          echo "ARTIFACTS_PATH=$(realpath $ARTIFACTS_PATH)" >> $GITHUB_ENV
+      env:
+        ARTIFACTS_PATH: '${{ matrix.projectPath }}/${{ matrix.report.resultsPath }}'
+      run: |
+        # first runs will probably not have the directory, so we need to create it so that realpath doesn't fail
+        mkdir -p $ARTIFACTS_PATH
+        echo "ARTIFACTS_PATH=$(realpath $ARTIFACTS_PATH)" >> $GITHUB_ENV
 
-      - name: 'Download Playwright last run info'
-        id: 'download-last-run-info'
-        if: ${{ always() && matrix.report.resultsPath != '' && matrix.testType == 'e2e' }}
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: 'last-run__${{ strategy.job-index }}'
-          path: '${{ runner.temp }}/last-run-info'
+    - name: 'Download Playwright last run info'
+      id: 'download-last-run-info'
+      if: ${{ always() && matrix.report.resultsPath != '' && matrix.testType == 'e2e' }}
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c   # v8.0.1
+      with:
+        pattern: 'last-run__${{ strategy.job-index }}'
+        path: '${{ runner.temp }}/last-run-info'
 
-      - name: 'Run tests (${{ matrix.testType }})'
-        timeout-minutes: ${{ ( 'push' == 'pull_request' && ( ( matrix.testType == 'e2e' && 20 ) || ( matrix.testType == 'unit:php' && 20 ) ) ) || 360 }}
-        env:
-          E2E_ENV_KEY: ${{ secrets.E2E_ENV_KEY }}
-          CODEVITALS_PROJECT_TOKEN: ${{ secrets.CODEVITALS_PROJECT_TOKEN }} # required by Metrics tests
-          LAST_FAILED_RUN: ${{ vars.LAST_FAILED_RUN }}
-          GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PLUGIN_SLUG: '' # required by test:plugincheck; nightly installs under the canonical 'woocommerce' folder
-          PLAYWRIGHT_JUNIT_SUITE_NAME: 'WooCommerce Core'
-          PLAYWRIGHT_JUNIT_SUITE_ID: 'woocommerce-core'
-        run: |
-          lastRunFile="${{ runner.temp }}/last-run-info/.last-run.json"
-          lastRunFileDest="$ARTIFACTS_PATH/.last-run.json"
+    - name: 'Run tests (${{ matrix.testType }})'
+      timeout-minutes: ${{ ( 'push' == 'pull_request' && ( ( matrix.testType == 'e2e' && 20 ) || ( matrix.testType == 'unit:php' && 20 ) ) ) || 360 }}
+      env:
+        E2E_ENV_KEY: ${{ secrets.E2E_ENV_KEY }}
+        CODEVITALS_PROJECT_TOKEN: ${{ secrets.CODEVITALS_PROJECT_TOKEN }}   # required by Metrics tests
+        LAST_FAILED_RUN: ${{ vars.LAST_FAILED_RUN }}
+        GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PLUGIN_SLUG: ''   # required by test:plugincheck; nightly installs under the canonical 'woocommerce' folder
+        PLAYWRIGHT_JUNIT_SUITE_NAME: 'WooCommerce Core'
+        PLAYWRIGHT_JUNIT_SUITE_ID: 'woocommerce-core'
+      run: |
+        lastRunFile="${{ runner.temp }}/last-run-info/.last-run.json"
+        lastRunFileDest="$ARTIFACTS_PATH/.last-run.json"
 
-          if [ -f "$lastRunFile" ]; then
-              echo "Found last run info file: \"$lastRunFile\""
-              echo "Moving to destination: \"$lastRunFileDest\""
-              mkdir -p "$ARTIFACTS_PATH"
-              mv "$lastRunFile" "$lastRunFileDest"
-          else
-              echo "No last run info file found. Searched for: \"$lastRunFile\""
-          fi
+        if [ -f "$lastRunFile" ]; then
+            echo "Found last run info file: \"$lastRunFile\""
+            echo "Moving to destination: \"$lastRunFileDest\""
+            mkdir -p "$ARTIFACTS_PATH"
+            mv "$lastRunFile" "$lastRunFileDest"
+        else
+            echo "No last run info file found. Searched for: \"$lastRunFile\""
+        fi
 
-          lastRunFlag=""
-          if [ -f "$lastRunFileDest" ]; then
-            # Playwright last run info is available, parse the file and check if there are failed tests
-            cat "$lastRunFileDest"
-            failedTests=$(jq '.failedTests | length' "$lastRunFileDest")
+        lastRunFlag=""
+        if [ -f "$lastRunFileDest" ]; then
+          # Playwright last run info is available, parse the file and check if there are failed tests
+          cat "$lastRunFileDest"
+          failedTests=$(jq '.failedTests | length' "$lastRunFileDest")
 
-            # Only if there are failed tests, we want to use the --last-failed flag.
-            # The run will fail if we're using the flag and there are no failed tests.
-            if [ "$failedTests" -gt 0 ]; then
-              if [ "$LAST_FAILED_RUN" == "1" ]; then
-                echo "Found failed tests, running only failed tests"
-                # Add shard 1/1 to override the default shard value. No tests will run for shards > 1.
-                # The clean way would be to replace the shard flag from the command, but this also works.
-                lastRunFlag="--last-failed --shard=1/1"
-              else
-                echo "Found failed tests, but LAST_FAILED_RUN is switched off. Running all tests."
-              fi
+          # Only if there are failed tests, we want to use the --last-failed flag.
+          # The run will fail if we're using the flag and there are no failed tests.
+          if [ "$failedTests" -gt 0 ]; then
+            if [ "$LAST_FAILED_RUN" == "1" ]; then
+              echo "Found failed tests, running only failed tests"
+              # Add shard 1/1 to override the default shard value. No tests will run for shards > 1.
+              # The clean way would be to replace the shard flag from the command, but this also works.
+              lastRunFlag="--last-failed --shard=1/1"
             else
-                echo "No failed tests found, running all tests"
+              echo "Found failed tests, but LAST_FAILED_RUN is switched off. Running all tests."
             fi
+          else
+              echo "No failed tests found, running all tests"
           fi
+        fi
 
-          # Finally, run the tests
-          pnpm --filter="${{ matrix.projectName }}" ${{ matrix.command }} $lastRunFlag
+        # Finally, run the tests
+        pnpm --filter="${{ matrix.projectName }}" ${{ matrix.command }} $lastRunFlag
 
-      - name: 'Upload Playwright last run info'
+    - name: 'Upload Playwright last run info'
         # always upload the last run info, even if the test run passed
-        if: ${{ always() && matrix.report.resultsPath != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: 'last-run__${{ strategy.job-index }}'
-          path: '${{ env.ARTIFACTS_PATH }}/.last-run.json'
-          if-no-files-found: ignore
-          include-hidden-files: true
-          overwrite: true
-          retention-days: 3
+      if: ${{ always() && matrix.report.resultsPath != '' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+      with:
+        name: 'last-run__${{ strategy.job-index }}'
+        path: '${{ env.ARTIFACTS_PATH }}/.last-run.json'
+        if-no-files-found: ignore
+        include-hidden-files: true
+        overwrite: true
+        retention-days: 3
 
-      - name: 'Upload artifacts'
-        if: ${{ always() && matrix.report.resultsPath != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: '${{ matrix.report.resultsBlobName }}__${{ strategy.job-index }}'
-          path: ${{ env.ARTIFACTS_PATH }}
-          retention-days: 7
+    - name: 'Upload artifacts'
+      if: ${{ always() && matrix.report.resultsPath != '' }}
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+      with:
+        name: '${{ matrix.report.resultsBlobName }}__${{ strategy.job-index }}'
+        path: ${{ env.ARTIFACTS_PATH }}
+        retention-days: 7
 
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
+
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   evaluate-project-jobs:
     # In order to add a required status check we need a consistent job that we can grab onto.
     # Since we are dynamically generating a matrix for the project jobs, however, we can't
@@ -577,49 +845,116 @@ jobs:
     name: 'Evaluate Project Job Statuses'
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 5
-    needs: [ 'project-jobs', 'woocommerce-plugin-build-artifact', 'project-lint-jobs', 'project-test-jobs', 'validate-changelog', 'validate-markdown', 'validate-syncpack' ]
+    needs: ['project-jobs', 'woocommerce-plugin-build-artifact', 'project-lint-jobs', 'project-test-jobs', 'validate-changelog', 'validate-markdown', 'validate-syncpack']
     # This job must run for all trigger types (not just PRs) so that alert-on-failure can access its outputs
     if: ${{ !cancelled() }}
     outputs:
       non_successful_jobs: ${{ steps.evaluation.outputs.non_successful_jobs }}
     steps:
-      - uses: crashappsec/action-checkout@main
-        name: 'Checkout'
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-          ref: ${{ inputs.refName != '' && inputs.refName || '' }}
-          sparse-checkout: |
-              .github/workflows/scripts
+    - uses: crashappsec/action-checkout@main
+      name: 'Checkout'
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+        ref: ${{ inputs.refName != '' && inputs.refName || '' }}
+        sparse-checkout: |
+          .github/workflows/scripts
 
-      - name: Assert instrumentation is live
-        # Socket existence, not LD_PRELOAD: co-monitor's loader clears
-        # LD_PRELOAD once it has injected, so an empty value is what success
-        # looks like. co-hostd also daemonizes, so pgrep does not match it.
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - name: 'Evaluation'
+      id: evaluation
+      env:
+        REPOSITORY: ${{ github.repository }}
+        RUN_ID: ${{ github.run_id }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        # Check if project-jobs was successful. Fail for any other status, including skipped.
+        result="${{ needs.project-jobs.result }}"
+        if [[ $result != "success" ]]; then
+          echo "Generating CI jobs was not successful."
+          exit 1
+        fi
 
+        node .github/workflows/scripts/evaluate-jobs-conclusions.js
 
-      - name: 'Evaluation'
-        id: evaluation
-        env:
-          REPOSITORY: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # Check if project-jobs was successful. Fail for any other status, including skipped.
-          result="${{ needs.project-jobs.result }}"
-          if [[ $result != "success" ]]; then
-            echo "Generating CI jobs was not successful."
-            exit 1
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
+
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
           fi
+        done
 
-          node .github/workflows/scripts/evaluate-jobs-conclusions.js
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
 
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   alert-on-failure:
     name: 'Report results on Slack'
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
@@ -629,61 +964,128 @@ jobs:
     env:
       NON_SUCCESSFUL_JOBS: ${{ needs.evaluate-project-jobs.outputs.non_successful_jobs }}
     steps:
-      - uses: crashappsec/action-checkout@main
-        name: 'Checkout'
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
-          ref: ${{ inputs.refName != '' && inputs.refName || '' }}
-          sparse-checkout: |
-              package.json
-              ./tools/monorepo-utils
-              .github/workflows
+    - uses: crashappsec/action-checkout@main
+      name: 'Checkout'
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
+        ref: ${{ inputs.refName != '' && inputs.refName || '' }}
+        sparse-checkout: |
+          package.json
+          ./tools/monorepo-utils
+          .github/workflows
 
-      - name: Assert instrumentation is live
-        # Socket existence, not LD_PRELOAD: co-monitor's loader clears
-        # LD_PRELOAD once it has injected, so an empty value is what success
-        # looks like. co-hostd also daemonizes, so pgrep does not match it.
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - name: 'Setup PNPM'
+      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271   # v6.0.9
 
+    - name: 'Send messages for failed jobs'
+      env:
+        SLACK_TOKEN: ${{ secrets.E2E_SLACK_TOKEN }}
+        DEFAULT_CHECKS_CHANNEL: ${{ secrets.TEST_REPORTS_SLACK_CHANNEL }}
+        RELEASE_CHECKS_CHANNEL: ${{ secrets.RELEASE_CHECKS_CHANNEL }}
+        DAILY_CHECKS_CHANNEL: ${{ secrets.DAILY_CHECKS_CHANNEL }}
+        HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        INPUT_TRIGGER: ${{ inputs.trigger }}
+      run: |
+        COMMIT_MESSAGE=`echo "$HEAD_COMMIT_MESSAGE" | head -1`
 
-      - name: 'Setup PNPM'
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        if [[ -n "${INPUT_TRIGGER}" ]]; then
+            CHECKS_TYPE="${INPUT_TRIGGER}"
+        else
+            CHECKS_TYPE=""
+        fi
 
-      - name: 'Send messages for failed jobs'
-        env:
-          SLACK_TOKEN: ${{ secrets.E2E_SLACK_TOKEN }}
-          DEFAULT_CHECKS_CHANNEL: ${{ secrets.TEST_REPORTS_SLACK_CHANNEL }}
-          RELEASE_CHECKS_CHANNEL: ${{ secrets.RELEASE_CHECKS_CHANNEL }}
-          DAILY_CHECKS_CHANNEL: ${{ secrets.DAILY_CHECKS_CHANNEL }}
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          INPUT_TRIGGER: ${{ inputs.trigger }}
-        run: |
-          COMMIT_MESSAGE=`echo "$HEAD_COMMIT_MESSAGE" | head -1`
+        # Parse non-successful jobs and create comma-separated list of job names
+        FAILED_JOBS=""
+        if [[ -n "${NON_SUCCESSFUL_JOBS}" ]]; then
+          FAILED_JOBS=$(echo "${NON_SUCCESSFUL_JOBS}" | jq -r '.[].name' | paste -sd "," -)
+        fi
 
-          if [[ -n "${INPUT_TRIGGER}" ]]; then
-              CHECKS_TYPE="${INPUT_TRIGGER}"
-          else
-              CHECKS_TYPE=""
+        pnpm utils slack-test-report -c "${{ needs.project-jobs.result }}" -r "$CHECKS_TYPE build jobs matrix" -m "$COMMIT_MESSAGE" --config ".github/workflows/slack-report-config.json"
+        # A shared plugin build failure skips the test jobs instead of failing them, so report it explicitly.
+        pnpm utils slack-test-report -c "${{ needs.woocommerce-plugin-build-artifact.result }}" -r "$CHECKS_TYPE WooCommerce plugin build" -m "$COMMIT_MESSAGE" --config ".github/workflows/slack-report-config.json"
+        pnpm utils slack-test-report -c "${{ needs.project-lint-jobs.result }}" -r "$CHECKS_TYPE linting" -m "$COMMIT_MESSAGE" --config ".github/workflows/slack-report-config.json"
+        pnpm utils slack-test-report -c "${{ needs.project-test-jobs.result }}" -r "$CHECKS_TYPE tests" -m "$COMMIT_MESSAGE" --config ".github/workflows/slack-report-config.json" --jobs-list "Failed:###$FAILED_JOBS"
+
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
+
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
           fi
+        done
 
-          # Parse non-successful jobs and create comma-separated list of job names
-          FAILED_JOBS=""
-          if [[ -n "${NON_SUCCESSFUL_JOBS}" ]]; then
-            FAILED_JOBS=$(echo "${NON_SUCCESSFUL_JOBS}" | jq -r '.[].name' | paste -sd "," -)
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
           fi
+        done
 
-          pnpm utils slack-test-report -c "${{ needs.project-jobs.result }}" -r "$CHECKS_TYPE build jobs matrix" -m "$COMMIT_MESSAGE" --config ".github/workflows/slack-report-config.json"
-          # A shared plugin build failure skips the test jobs instead of failing them, so report it explicitly.
-          pnpm utils slack-test-report -c "${{ needs.woocommerce-plugin-build-artifact.result }}" -r "$CHECKS_TYPE WooCommerce plugin build" -m "$COMMIT_MESSAGE" --config ".github/workflows/slack-report-config.json"
-          pnpm utils slack-test-report -c "${{ needs.project-lint-jobs.result }}" -r "$CHECKS_TYPE linting" -m "$COMMIT_MESSAGE" --config ".github/workflows/slack-report-config.json"
-          pnpm utils slack-test-report -c "${{ needs.project-test-jobs.result }}" -r "$CHECKS_TYPE tests" -m "$COMMIT_MESSAGE" --config ".github/workflows/slack-report-config.json" --jobs-list "Failed:###$FAILED_JOBS"
-
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   test-reports:
     name: 'Test reports - ${{ matrix.report }}'
     needs: ['identify-jobs-to-run', 'project-jobs', 'project-test-jobs', 'evaluate-project-jobs']
@@ -699,83 +1101,83 @@ jobs:
       ARTIFACT_NAME: ${{ matrix.report }}-attempt-${{ github.run_attempt }}
 
     steps:
-      - name: 'Merge artifacts'
-        id: merge-artifacts
-        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        continue-on-error: true
-        with:
-          name: ${{ env.ARTIFACT_NAME }}
-          pattern: ${{ matrix.report }}__*
-          delete-merged: true
-          retention-days: 14
+    - name: 'Merge artifacts'
+      id: merge-artifacts
+      uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a   # v7.0.1
+      continue-on-error: true
+      with:
+        name: ${{ env.ARTIFACT_NAME }}
+        pattern: ${{ matrix.report }}__*
+        delete-merged: true
+        retention-days: 14
 
-      - name: 'Publish report to dashboard'
-        if: ${{ !! steps.merge-artifacts.outputs.artifact-id }}
-        env:
-          GH_TOKEN: ${{ secrets.TEST_REPORTS_DISPATCH_WORKFLOW_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPORT_NAME: ${{ matrix.report }}
-          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          EVENT_NAME: ${{ inputs.trigger == '' && 'push' || inputs.trigger }}
-          REF_NAME: ${{ inputs.refName != '' && inputs.refName || github.ref_name }}
-        run: |
-          if [[ "${{ 'push' }}" == "pull_request" ]]; then
-            REPORT_TITLE="$PR_TITLE"
-            REF_NAME="$GITHUB_HEAD_REF"
-          elif [[ "${{ 'push' }}" == "push" ]]; then
-            REPORT_TITLE=`echo "$HEAD_COMMIT_MESSAGE" | head -1`
-          else
-            REPORT_TITLE="$EVENT_NAME"
-          fi
+    - name: 'Publish report to dashboard'
+      if: ${{ !! steps.merge-artifacts.outputs.artifact-id }}
+      env:
+        GH_TOKEN: ${{ secrets.TEST_REPORTS_DISPATCH_WORKFLOW_TOKEN }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPORT_NAME: ${{ matrix.report }}
+        HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        EVENT_NAME: ${{ inputs.trigger == '' && 'push' || inputs.trigger }}
+        REF_NAME: ${{ inputs.refName != '' && inputs.refName || github.ref_name }}
+      run: |
+        if [[ "${{ 'push' }}" == "pull_request" ]]; then
+          REPORT_TITLE="$PR_TITLE"
+          REF_NAME="$GITHUB_HEAD_REF"
+        elif [[ "${{ 'push' }}" == "push" ]]; then
+          REPORT_TITLE=`echo "$HEAD_COMMIT_MESSAGE" | head -1`
+        else
+          REPORT_TITLE="$EVENT_NAME"
+        fi
 
-          gh workflow run report.yml \
-            -f artifact="$ARTIFACT_NAME" \
-            -f run_id="$GITHUB_RUN_ID" \
-            -f run_attempt="$GITHUB_RUN_ATTEMPT" \
-            -f event="$EVENT_NAME" \
-            -f pr_number="$PR_NUMBER" \
-            -f ref_name="$REF_NAME" \
-            -f commit_sha="$GITHUB_SHA" \
-            -f repository="$GITHUB_REPOSITORY" \
-            -f suite="$REPORT_NAME" \
-            -f report_title="$REPORT_TITLE" \
-            --repo woocommerce/woocommerce-test-reports
+        gh workflow run report.yml \
+          -f artifact="$ARTIFACT_NAME" \
+          -f run_id="$GITHUB_RUN_ID" \
+          -f run_attempt="$GITHUB_RUN_ATTEMPT" \
+          -f event="$EVENT_NAME" \
+          -f pr_number="$PR_NUMBER" \
+          -f ref_name="$REF_NAME" \
+          -f commit_sha="$GITHUB_SHA" \
+          -f repository="$GITHUB_REPOSITORY" \
+          -f suite="$REPORT_NAME" \
+          -f report_title="$REPORT_TITLE" \
+          --repo woocommerce/woocommerce-test-reports
 
-      - name: 'Add a link to test report in summary'
-        if: ${{ strategy.job-index == 0 }} # only add the link once
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
-        with:
-          script: |
-            const BASE_REPORT_URL = 'https://woocommerce.github.io/woocommerce-test-reports/#/';
-            function getReportUrl() {
-                if (context.eventName === 'pull_request') {
-                    return `${BASE_REPORT_URL}pr/${context.issue.number}`;
-                }
+    - name: 'Add a link to test report in summary'
+      if: ${{ strategy.job-index == 0 }}   # only add the link once
+      uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd   # v8.0.0
+      with:
+        script: |
+          const BASE_REPORT_URL = 'https://woocommerce.github.io/woocommerce-test-reports/#/';
+          function getReportUrl() {
+              if (context.eventName === 'pull_request') {
+                  return `${BASE_REPORT_URL}pr/${context.issue.number}`;
+              }
 
-                if (context.eventName === 'push') {
-                    const shortSha = context.sha.substring(0, 7);
-                    if (context.ref === 'refs/heads/trunk') {
-                        return `${BASE_REPORT_URL}trunk/trunk-${shortSha}`;
-                    }
-                }
+              if (context.eventName === 'push') {
+                  const shortSha = context.sha.substring(0, 7);
+                  if (context.ref === 'refs/heads/trunk') {
+                      return `${BASE_REPORT_URL}trunk/trunk-${shortSha}`;
+                  }
+              }
 
-                return BASE_REPORT_URL;
-            }
+              return BASE_REPORT_URL;
+          }
 
-            const reportUrl = getReportUrl();
+          const reportUrl = getReportUrl();
 
-            await core.summary
-              .addHeading('Test Report', '2')
-              .addLink('See test reports', reportUrl)
-              .addBreak()
-              .addRaw('Note that it can take a few minutes for the reports to be generated and be available', true)
-              .write();
+          await core.summary
+            .addHeading('Test Report', '2')
+            .addLink('See test reports', reportUrl)
+            .addBreak()
+            .addRaw('Note that it can take a few minutes for the reports to be generated and be available', true)
+            .write();
 
   validate-syncpack:
     name: 'Validate dependencies version'
     if: ${{ !cancelled() && 'push' == 'pull_request' && needs.identify-jobs-to-run.outputs.needs-syncpack-validation == 'true' }}
-    needs: [ 'identify-jobs-to-run' ]
+    needs: ['identify-jobs-to-run']
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
@@ -783,40 +1185,107 @@ jobs:
       id-token: write
 
     steps:
-      - uses: crashappsec/action-checkout@main
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
+    - uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
 
-      - name: Assert instrumentation is live
-        # Socket existence, not LD_PRELOAD: co-monitor's loader clears
-        # LD_PRELOAD once it has injected, so an empty value is what success
-        # looks like. co-hostd also daemonizes, so pgrep does not match it.
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - name: 'Setup - node'
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e   # v6.4.0
+      with:
+        node-version-file: .nvmrc
 
+    - name: 'Setup - syncpack'
+      run: npm install -g syncpack@15.3.3
 
-      - name: 'Setup - node'
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
+    - name: 'Validate - mismatches'
+      run: syncpack lint
 
-      - name: 'Setup - syncpack'
-        run: npm install -g syncpack@15.3.3
+    - name: 'Validate - prompt mitigation on failed validation'
+      if: failure()
+      run: |
+        echo "Dependency version mismatch detected. This can usually be fixed automatically by updating the dependency version in \`.syncpackrc\` or \`pnpm-workspace.yaml\`, then running: \`pnpm sync-dependencies\`"
+        exit 1
 
-      - name: 'Validate - mismatches'
-        run: syncpack lint
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
 
-      - name: 'Validate - prompt mitigation on failed validation'
-        if: failure()
-        run: |
-          echo "Dependency version mismatch detected. This can usually be fixed automatically by updating the dependency version in \`.syncpackrc\` or \`pnpm-workspace.yaml\`, then running: \`pnpm sync-dependencies\`"
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
           exit 1
-
+        fi
+        echo "instrumentation check passed"
   validate-changelog:
     name: 'Validate changelog'
     if: |-
@@ -829,7 +1298,7 @@ jobs:
         ( github.event.pull_request.base.ref == 'trunk' || startsWith( github.event.pull_request.base.ref, 'release/' ) ) &&
         ! contains( github.event.pull_request.body, '[x] This Pull Request does not require a changelog' )
       }}
-    needs: [ 'identify-jobs-to-run' ]
+    needs: ['identify-jobs-to-run']
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
@@ -837,72 +1306,139 @@ jobs:
       id-token: write
 
     steps:
-      - uses: crashappsec/action-checkout@main
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
+    - uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
 
-      - name: Assert instrumentation is live
-        # Socket existence, not LD_PRELOAD: co-monitor's loader clears
-        # LD_PRELOAD once it has injected, so an empty value is what success
-        # looks like. co-hostd also daemonizes, so pgrep does not match it.
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - uses: './.github/actions/setup-woocommerce-monorepo'
 
+    - name: 'Validate - missing entries'
+      id: validate_missing
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        passed=$( php tools/monorepo/check-changelogger-use.php --debug --pr-number=${{ github.event.pull_request.number }} | tee -a /dev/stderr | grep 'Passed validation' )
+        echo "passed=${passed/Passed validation: /}" >> $GITHUB_OUTPUT
 
-      - uses: './.github/actions/setup-woocommerce-monorepo'
+    - name: 'Validate - existing entries'
+      run: |
+        echo "Validating: ${{ steps.validate_missing.outputs.passed }}"
+        filter='';
+        for package in $( echo "${{ steps.validate_missing.outputs.passed }}" | tr -d "[:space:]" | tr "," "\n" ); do
+            filter="$filter --filter $package"
+        done
+        echo "Populated filter: $filter"
 
-      - name: 'Validate - missing entries'
-        id: validate_missing
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-            passed=$( php tools/monorepo/check-changelogger-use.php --debug --pr-number=${{ github.event.pull_request.number }} | tee -a /dev/stderr | grep 'Passed validation' )
-            echo "passed=${passed/Passed validation: /}" >> $GITHUB_OUTPUT
+        if [ -z "$filter" ]; then
+            echo "No touched packages use changelogger; nothing to validate."
+            exit 0
+        fi
 
-      - name: 'Validate - existing entries'
-        run: |
-            echo "Validating: ${{ steps.validate_missing.outputs.passed }}"
-            filter='';
-            for package in $( echo "${{ steps.validate_missing.outputs.passed }}" | tr -d "[:space:]" | tr "," "\n" ); do
-                filter="$filter --filter $package"
-            done
-            echo "Populated filter: $filter"
+        pnpm --parallel --workspace-concurrency=10 --stream $filter changelog validate
 
-            if [ -z "$filter" ]; then
-                echo "No touched packages use changelogger; nothing to validate."
-                exit 0
-            fi
+    - name: 'Validate - single-line messages'
+      run: |
+        # Changelog entry messages must be a single line. Multi-line messages break the
+        # line-based sorting and rendering done by the "Release: Compile changelog" workflow.
+        fail=0
+        while IFS= read -r file; do
+          if ! awk '
+            !body && /^Significance:/ { sig=1 }
+            !body && /^[[:space:]]*$/ { body=1; next }
+            body { if (NF) c++ }
+            END { exit (sig && c>1) }
+          ' "$file"; then
+            echo "::error file=${file}::Changelog message must be a single line so it can be sorted and rendered correctly during release. Move any extra detail into the 'Comment:' header."
+            fail=1
+          fi
+        done < <(git ls-files -- '*/changelog/*' ':!:*/changelog/*.md' ':!:*/changelog/*.txt' ':!:*/changelog/.*')
+        exit $fail
 
-            pnpm --parallel --workspace-concurrency=10 --stream $filter changelog validate
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
 
-      - name: 'Validate - single-line messages'
-        run: |
-            # Changelog entry messages must be a single line. Multi-line messages break the
-            # line-based sorting and rendering done by the "Release: Compile changelog" workflow.
-            fail=0
-            while IFS= read -r file; do
-              if ! awk '
-                !body && /^Significance:/ { sig=1 }
-                !body && /^[[:space:]]*$/ { body=1; next }
-                body { if (NF) c++ }
-                END { exit (sig && c>1) }
-              ' "$file"; then
-                echo "::error file=${file}::Changelog message must be a single line so it can be sorted and rendered correctly during release. Move any extra detail into the 'Comment:' header."
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
+
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
                 fail=1
               fi
-            done < <(git ls-files -- '*/changelog/*' ':!:*/changelog/*.md' ':!:*/changelog/*.txt' ':!:*/changelog/.*')
-            exit $fail
+              ;;
+          esac
+        done
 
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
   validate-markdown:
     name: 'Validate markdown'
     if: ${{ !cancelled() && 'push' == 'pull_request' && github.event.pull_request.base.ref == 'trunk' && needs.identify-jobs-to-run.outputs.needs-markdown-validation == 'true' }}
-    needs: [ 'identify-jobs-to-run' ]
+    needs: ['identify-jobs-to-run']
     runs-on: ${{ github.event.pull_request.user.login == 'woocommercebot' && fromJSON('{"group":"WooCommerce Release Checks"}') || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
@@ -910,52 +1446,119 @@ jobs:
       id-token: write
 
     steps:
-      - uses: crashappsec/action-checkout@main
-        with:
-          chalk: ${{ env.CHALK_ON }}
-          profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
-          observables_continue_on_error: false
-          lfs: false
+    - uses: crashappsec/action-checkout@main
+      with:
+        chalk: ${{ env.CHALK_ON }}
+        profile: ${{ inputs.profile || 'curiosity-tests-racecar' }}
+        observables_continue_on_error: false
+        lfs: false
 
-      - name: Assert instrumentation is live
-        # Socket existence, not LD_PRELOAD: co-monitor's loader clears
-        # LD_PRELOAD once it has injected, so an empty value is what success
-        # looks like. co-hostd also daemonizes, so pgrep does not match it.
-        if: env.CHALK_ON == 'true'
-        run: |
-          test -n "${CURIOSITY_ROOT:-}" || { echo "::error::CURIOSITY_ROOT unset - observables never installed"; exit 1; }
-          test -S "${CURIOSITY_SOCKET_NAME:?socket name unset}" || { echo "::error::co-hostd socket absent"; exit 1; }
+    - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706   # v4.0.2
+      id: target-changes
+      with:
+        list-files: shell
+        filters: |
+          needs-markdown-linting:
+            - added|modified: '!(.github/**|.linear/**)/**/*.md'
+            - added|modified: '*.md'
+          needs-docs-build-validation:
+            - 'docs/**/*.md'
 
+    - name: 'Setup - node'
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e   # v6.4.0
+      with:
+        node-version-file: .nvmrc
 
-      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
-        id: target-changes
-        with:
-          list-files: shell
-          filters: |
-            needs-markdown-linting:
-              - added|modified: '!(.github/**|.linear/**)/**/*.md'
-              - added|modified: '*.md'
-            needs-docs-build-validation:
-              - 'docs/**/*.md'
+    - name: 'Setup - pnpm'
+      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271   # v6.0.9
 
-      - name: 'Setup - node'
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: .nvmrc
+    - name: 'Validate - lint md-files'
+      if: ${{ steps.target-changes.outputs.needs-markdown-linting }}
+      shell: bash
+      run: pnpm dlx markdownlint-cli -- ${{ steps.target-changes.outputs.needs-markdown-linting_files }}
 
-      - name: 'Setup - pnpm'
-        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+    - name: 'Validate - lint docs-files'
+      if: ${{ always() && steps.target-changes.outputs.needs-docs-build-validation }}
+      shell: bash
+      working-directory: docs/_docu-tools
+      run: |
+        pnpm install --ignore-workspace
+        pnpm run lint:markdown
+        pnpm exec docusaurus build --config ./utils/docusaurus-faster.deploy.config.js
+    - name: Check observables and crashes
+      if: always() && env.CHALK_ON == 'true'
+      shell: bash
+      run: |
+        set -uo pipefail
+        root="${CURIOSITY_ROOT:-}"
+        home="${CURIOSITY_HOME:-/mnt/curiosity}"
+        obs="${home}/observables"
+        fail=0
 
-      - name: 'Validate - lint md-files'
-        if: ${{ steps.target-changes.outputs.needs-markdown-linting }}
-        shell: bash
-        run: pnpm dlx markdownlint-cli -- ${{ steps.target-changes.outputs.needs-markdown-linting_files }}
+        echo "::group::curiosity layout"
+        echo "CURIOSITY_ROOT=${root:-<unset>}"
+        echo "CURIOSITY_HOME=${home}"
+        ls -la "${obs}" 2>/dev/null || echo "no observables dir at ${obs}"
+        echo "::endgroup::"
 
-      - name: 'Validate - lint docs-files'
-        if: ${{ always() && steps.target-changes.outputs.needs-docs-build-validation }}
-        shell: bash
-        working-directory: docs/_docu-tools
-        run: |
-            pnpm install --ignore-workspace
-            pnpm run lint:markdown
-            pnpm exec docusaurus build --config ./utils/docusaurus-faster.deploy.config.js
+        # Observables for THIS run+attempt. The prefix matters: a stale file from an
+        # earlier run on the same mount would otherwise pass.
+        prefix="${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+        shopt -s nullglob
+        mine=("${obs}/${prefix}"*)
+        if [ ${#mine[@]} -eq 0 ]; then
+          mine=("${obs}/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-observables"*)
+        fi
+        if [ ${#mine[@]} -eq 0 ]; then
+          echo "::error::no observables for run ${prefix} in ${obs} - instrumentation produced nothing"
+          fail=1
+        else
+          echo "observables present: ${#mine[@]} file(s)"
+          printf '  %s\n' "${mine[@]}"
+        fi
+
+        for f in "${mine[@]}"; do
+          case "$f" in
+            *.jsonl|*.json|*.combined)
+              if ! jq --slurp "." "$f" > /dev/null 2>&1; then
+                echo "::error::observables do not parse: $f"
+                fail=1
+              fi
+              ;;
+          esac
+        done
+
+        # Crash thresholds copied from check-run: a few null frames are noise, more than
+        # five is a stack walk into nothing.
+        for f in "${root}"/log/co-host*.log "${home}"/log/co-host*.log; do
+          [ -f "$f" ] || continue
+          echo "Asserting that there is no crash in $f"
+          if [ "$(grep -c 'p 00000000' "$f" 2>/dev/null || echo 0)" -gt 5 ] \
+            || [ "$(grep -E -c 'FATAL: Uncaught signal|Address not mapped at|RAX 0x.*RBX 0x' "$f" 2>/dev/null || echo 0)" -gt 1 ]; then
+            echo "::error::crash signature in $f"
+            grep -E 'FATAL: Uncaught signal|Address not mapped at' "$f" | head -5 || true
+            fail=1
+          fi
+        done
+
+        cores=("${root}"/coredump.* "${home}"/coredump.*)
+        if [ ${#cores[@]} -gt 0 ]; then
+          echo "::error::coredump present: ${cores[*]}"
+          fail=1
+        fi
+
+        for f in "${root}"/runc.log "${root}"/runc.global.log \
+                 "${home}"/runc.log "${home}"/runc.global.log; do
+          [ -f "$f" ] || continue
+          if grep -q '^E:' "$f"; then
+            echo "::error::error in $f"
+            grep '^E:' "$f" | head -5
+            fail=1
+          fi
+        done
+
+        if [ "$fail" -ne 0 ]; then
+          echo "::error::instrumentation check FAILED"
+          exit 1
+        fi
+        echo "instrumentation check passed"
