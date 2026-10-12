@@ -2,8 +2,7 @@ name: 'Release checks run'
 run-name: ${{ github.event_name == 'schedule' && 'scheduled' || github.event_name == 'release' && 'release' || '' }} checks ${{ github.ref_name != 'trunk' && github.ref_name || '' }}
 
 on:
-  schedule:
-    - cron: '0 3 * * *' # Runs at 3 AM UTC.
+  workflow_dispatch:
   release:
     types: [ published, edited ]
 

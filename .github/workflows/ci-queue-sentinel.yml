@@ -5,8 +5,6 @@ name: 'CI Queue Sentinel'
 # it is set. Variables written here must only be consumed via `env:` or `${{ }}`
 # comparisons, never interpolated into `run:` blocks.
 on:
-  schedule:
-    - cron: '*/15 * * * *'
   workflow_dispatch:
     inputs:
       mode:

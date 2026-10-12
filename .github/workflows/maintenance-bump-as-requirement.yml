@@ -1,7 +1,5 @@
 name: 'Maintenance: Bump Action Scheduler version'
 on:
-  schedule:
-    - cron: '0 0 * * *' # Runs every day at midnight UTC
   workflow_dispatch:
     inputs:
       version:
